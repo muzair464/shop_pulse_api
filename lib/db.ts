@@ -42,8 +42,20 @@ export function getServicePool(): Pool {
 }
 
 // Convenience aliases used throughout Route Handlers.
-export const authenticatedPool = { query: (...args: Parameters<Pool['query']>) => getAuthPool().query(...args as never), connect: () => getAuthPool().connect() };
-export const serviceRolePool   = { query: (...args: Parameters<Pool['query']>) => getServicePool().query(...args as never), connect: () => getServicePool().connect() };
+// These are thin wrappers so existing call sites work without change.
+export const authenticatedPool = {
+  query<T extends object = object>(sql: string, values?: unknown[]): Promise<import('pg').QueryResult<T>> {
+    return getAuthPool().query<T>(sql, values);
+  },
+  connect() { return getAuthPool().connect(); },
+};
+
+export const serviceRolePool = {
+  query<T extends object = object>(sql: string, values?: unknown[]): Promise<import('pg').QueryResult<T>> {
+    return getServicePool().query<T>(sql, values);
+  },
+  connect() { return getServicePool().connect(); },
+};
 
 /**
  * Sets the Supabase JWT claims GUC so auth.uid() and RLS policies work
