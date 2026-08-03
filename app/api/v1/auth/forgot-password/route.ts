@@ -1,9 +1,12 @@
+import { NextRequest } from 'next/server';
 import { supabaseForgotPassword } from '@/lib/auth.service';
-import { withHandler } from '@/lib/requireAuth';
+import { handleErrors } from '@/lib/requireAuth';
 
-export const POST = withHandler(async (req) => {
-  const { email } = await req.json() as { email?: string };
-  if (!email) return Response.json({ error: 'Email is required.' }, { status: 400 });
-  await supabaseForgotPassword(email);
-  return Response.json({ ok: true });
-});
+export async function POST(req: NextRequest): Promise<Response> {
+  return handleErrors(async () => {
+    const { email } = await req.json() as { email?: string };
+    if (!email) return Response.json({ error: 'Email is required.' }, { status: 400 });
+    await supabaseForgotPassword(email);
+    return Response.json({ ok: true });
+  });
+}

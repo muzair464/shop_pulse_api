@@ -1,12 +1,20 @@
 /**
  * lib/requireAuth.ts — authentication helper for Next.js Route Handlers.
  *
- * Usage in a Route Handler:
- *   const user = await requireAuth(request);
- *   // throws a Response with 401 JSON if not authenticated
+ * Pattern: call requireAuth(request) at the top of each Route Handler.
+ * It returns AuthedUser on success, or throws AuthError on failure.
+ * Each Route Handler wraps its body in handleErrors() for consistent
+ * error responses — no wrapper functions needed, so Next.js types stay clean.
+ *
+ * Usage:
+ *   export async function GET(req: NextRequest) {
+ *     return handleErrors(async () => {
+ *       const user = await requireAuth(req);
+ *       ...
+ *     });
+ *   }
  */
 
-import { cookies } from 'next/headers';
 import { verifySupabaseJwt } from './verifyJwt';
 import { getAuthPool } from './db';
 import { logger } from './logger';
@@ -19,27 +27,35 @@ export interface AuthedUser {
   claims:   Record<string, unknown>;
 }
 
-/** Thrown when authentication fails — caught by Route Handlers to return 401. */
+/** Thrown when authentication fails — caught by handleErrors() to return 401. */
 export class AuthError extends Error {
   readonly status: number;
   constructor(message: string, status = 401) {
     super(message);
-    this.name  = 'AuthError';
+    this.name   = 'AuthError';
     this.status = status;
   }
 }
 
+/** Thrown by route logic to return a specific HTTP status. */
+export class AppError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name   = 'AppError';
+    this.status = status;
+  }
+}
+
+/**
+ * Verify the httpOnly access_token cookie and resolve the user + shop.
+ * Throws AuthError on any failure — never returns null.
+ */
 export async function requireAuth(request: Request): Promise<AuthedUser> {
-  // ── 1. Extract cookie from the request ────────────────────────────────────
-  // In Next.js 15 Route Handlers we can read cookies either from the
-  // incoming Request headers or via next/headers cookies() helper.
-  // We read from the Request directly so this function is pure.
   const cookieHeader = request.headers.get('cookie') ?? '';
   const token        = parseCookie(cookieHeader, 'access_token');
-
   if (!token) throw new AuthError('Not authenticated.');
 
-  // ── 2. Verify JWT ─────────────────────────────────────────────────────────
   let payload;
   try {
     payload = await verifySupabaseJwt(token);
@@ -54,7 +70,6 @@ export async function requireAuth(request: Request): Promise<AuthedUser> {
   const sessionId = payload['session_id'] as string | undefined;
   const claims    = payload as unknown as Record<string, unknown>;
 
-  // ── 3. Resolve shop + check device revocation ─────────────────────────────
   const pool = getAuthPool();
   const { rows } = await pool.query<{
     shop_id: string; device_id: string | null; revoked_at: string | null; email: string;
@@ -68,56 +83,46 @@ export async function requireAuth(request: Request): Promise<AuthedUser> {
   );
 
   if (rows.length === 0) throw new AuthError('User or shop not found.');
-  const row = rows[0];
-  if (row.revoked_at)  throw new AuthError('This device session has been revoked.');
+  if (rows[0].revoked_at) throw new AuthError('This device session has been revoked.');
 
-  // ── 4. Bump last_active_at (fire-and-forget) ──────────────────────────────
-  if (row.device_id) {
-    pool.query(`UPDATE devices SET last_active_at = now() WHERE id = $1`, [row.device_id])
-      .catch((err: unknown) => logger.warn('Failed to bump last_active_at', err));
+  // Bump last_active_at fire-and-forget.
+  if (rows[0].device_id) {
+    pool.query(`UPDATE devices SET last_active_at = now() WHERE id = $1`, [rows[0].device_id])
+      .catch((e: unknown) => logger.warn('Failed to bump last_active_at', e));
   }
 
-  return { userId, shopId: row.shop_id, email: row.email, deviceId: row.device_id, claims };
-}
-
-/** Wrap a Route Handler with error handling for AuthError and generic errors. */
-export function withAuth(
-  handler: (req: Request, user: AuthedUser, ctx?: { params: Promise<Record<string, string>> }) => Promise<Response>,
-) {
-  return async (req: Request, ctx?: { params: Promise<Record<string, string>> }): Promise<Response> => {
-    try {
-      const user = await requireAuth(req);
-      return await handler(req, user, ctx);
-    } catch (err) {
-      if (err instanceof AuthError) {
-        return Response.json({ error: err.message }, { status: err.status });
-      }
-      const appErr = err as { code?: string; statusCode?: number; message?: string };
-      if (appErr.code === 'P0001') return Response.json({ error: appErr.message }, { status: 409 });
-      if (appErr.statusCode)       return Response.json({ error: appErr.message }, { status: appErr.statusCode });
-      logger.error('Unhandled Route Handler error', err);
-      return Response.json({ error: 'An unexpected error occurred.' }, { status: 500 });
-    }
+  return {
+    userId,
+    shopId:   rows[0].shop_id,
+    email:    rows[0].email,
+    deviceId: rows[0].device_id,
+    claims,
   };
 }
 
-/** Wrap a public Route Handler (no auth) with generic error handling only. */
-export function withHandler(
-  handler: (req: Request, ctx?: { params: Promise<Record<string, string>> }) => Promise<Response>,
-) {
-  return async (req: Request, ctx?: { params: Promise<Record<string, string>> }): Promise<Response> => {
-    try {
-      return await handler(req, ctx);
-    } catch (err) {
-      const appErr = err as { statusCode?: number; message?: string };
-      if (appErr.statusCode) return Response.json({ error: appErr.message }, { status: appErr.statusCode });
-      logger.error('Unhandled Route Handler error', err);
-      return Response.json({ error: 'An unexpected error occurred.' }, { status: 500 });
+/**
+ * Wraps Route Handler logic with consistent error handling.
+ * Catches AuthError → 401, AppError → custom status, pg P0001 → 409, else 500.
+ */
+export async function handleErrors(fn: () => Promise<Response>): Promise<Response> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (err instanceof AuthError) {
+      return Response.json({ error: err.message }, { status: err.status });
     }
-  };
+    if (err instanceof AppError) {
+      return Response.json({ error: err.message }, { status: err.status });
+    }
+    const pgErr = err as { code?: string; statusCode?: number; message?: string };
+    if (pgErr.code === 'P0001') return Response.json({ error: pgErr.message }, { status: 409 });
+    if (pgErr.statusCode)       return Response.json({ error: pgErr.message }, { status: pgErr.statusCode });
+    logger.error('Unhandled Route Handler error', err);
+    return Response.json({ error: 'An unexpected error occurred.' }, { status: 500 });
+  }
 }
 
-function parseCookie(header: string, name: string): string | undefined {
+export function parseCookie(header: string, name: string): string | undefined {
   const match = header.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
   return match ? decodeURIComponent(match[1]) : undefined;
 }
