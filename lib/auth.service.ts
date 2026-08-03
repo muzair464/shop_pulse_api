@@ -49,10 +49,12 @@ export async function supabaseSignIn(email: string, password: string): Promise<S
 export async function supabaseSignUp(email: string, password: string, redirectTo: string): Promise<{ id: string; email: string }> {
   let res: Response;
   try {
-    res = await fetch(`${env.SUPABASE_URL}/auth/v1/admin/users`, {
+    // Use the public signup endpoint so Supabase sends a "Confirm your email"
+    // link (type=email), NOT the admin endpoint which sends a recovery email.
+    res = await fetch(`${env.SUPABASE_URL}/auth/v1/signup`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'apikey': env.SUPABASE_SERVICE_ROLE_KEY, 'Authorization': `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}` },
-      body: JSON.stringify({ email, password, email_confirm: false, options: { emailRedirectTo: redirectTo } }),
+      headers: { 'Content-Type': 'application/json', 'apikey': env.SUPABASE_ANON_KEY },
+      body: JSON.stringify({ email, password, options: { emailRedirectTo: redirectTo } }),
     });
   } catch (cause) {
     logger.error('supabaseSignUp: network error', cause);
@@ -62,10 +64,14 @@ export async function supabaseSignUp(email: string, password: string, redirectTo
   if (!res.ok) {
     const b = await res.json() as SupabaseErrorResponse;
     const e = supabaseErr(b, 'Sign up failed.');
+    // 422 = email already registered
     e.statusCode = res.status === 422 ? 409 : res.status;
     throw e;
   }
-  return res.json() as Promise<{ id: string; email: string }>;
+  const data = await res.json() as { id?: string; user?: { id: string; email: string }; email?: string };
+  // Public signup returns { user: { id, email, ... }, session: null } when email confirmation is required.
+  const user = data.user ?? (data as unknown as { id: string; email: string });
+  return { id: user.id, email: user.email ?? email };
 }
 
 export async function supabaseDeleteUser(userId: string): Promise<void> {
@@ -97,13 +103,22 @@ export async function supabaseRevokeSession(refreshToken: string): Promise<void>
   } catch (err) { logger.warn('supabaseRevokeSession failed', err); }
 }
 
-export async function supabaseForgotPassword(email: string): Promise<void> {
+export async function supabaseForgotPassword(email: string, redirectTo: string): Promise<void> {
   const res = await fetch(`${env.SUPABASE_URL}/auth/v1/recover`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'apikey': env.SUPABASE_ANON_KEY },
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({ email, gotrue_meta_security: {}, options: { emailRedirectTo: redirectTo } }),
   });
   if (!res.ok) { const b = await res.json() as SupabaseErrorResponse; throw new Error(b.message ?? 'Failed to send reset email.'); }
+}
+
+export async function supabaseResendVerification(email: string, redirectTo: string): Promise<void> {
+  const res = await fetch(`${env.SUPABASE_URL}/auth/v1/resend`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'apikey': env.SUPABASE_ANON_KEY },
+    body: JSON.stringify({ type: 'signup', email, options: { emailRedirectTo: redirectTo } }),
+  });
+  if (!res.ok) { const b = await res.json() as SupabaseErrorResponse; throw new Error(b.message ?? 'Failed to resend verification email.'); }
 }
 
 export async function supabaseUpdatePassword(userId: string, newPassword: string): Promise<void> {
