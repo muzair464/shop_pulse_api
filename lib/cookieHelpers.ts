@@ -22,15 +22,15 @@ function cookieString(
     'HttpOnly',
     `SameSite=${env.COOKIE_SAME_SITE}`,
   ];
-  if (env.COOKIE_SECURE)             parts.push('Secure');
-  if (env.COOKIE_DOMAIN)             parts.push(`Domain=${env.COOKIE_DOMAIN}`);
+  if (env.COOKIE_SECURE)                           parts.push('Secure');
+  if (env.COOKIE_DOMAIN && env.COOKIE_DOMAIN !== 'none') parts.push(`Domain=${env.COOKIE_DOMAIN}`);
   return parts.join('; ');
 }
 
 function clearCookieString(name: string): string {
   const parts = [`${name}=`, 'Max-Age=0', 'Path=/', 'HttpOnly', `SameSite=${env.COOKIE_SAME_SITE}`];
-  if (env.COOKIE_SECURE) parts.push('Secure');
-  if (env.COOKIE_DOMAIN) parts.push(`Domain=${env.COOKIE_DOMAIN}`);
+  if (env.COOKIE_SECURE)                           parts.push('Secure');
+  if (env.COOKIE_DOMAIN && env.COOKIE_DOMAIN !== 'none') parts.push(`Domain=${env.COOKIE_DOMAIN}`);
   return parts.join('; ');
 }
 
