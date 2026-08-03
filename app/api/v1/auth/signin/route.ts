@@ -30,9 +30,12 @@ export async function POST(req: NextRequest): Promise<Response> {
       [userId, sessionId, deviceName],
     );
     const deviceId = deviceResult.rows[0]?.id;
-    if (deviceId) sendNewDeviceAlert(tokens.user.email, deviceName, `${env.FRONTEND_URL}/settings`);
 
     logger.info('User signed in', { userId, shopId: shop.id, deviceId });
+    if (deviceId && tokens.user.email) {
+      try { sendNewDeviceAlert(tokens.user.email, deviceName, `${env.FRONTEND_URL}/settings`); }
+      catch { /* fire-and-forget — never let email failure crash signin */ }
+    }
     return jsonWithCookies(
       { user: { id: userId, email: tokens.user.email }, shop: { id: shop.id, name: shop.name } },
       tokens.access_token, tokens.refresh_token, tokens.expires_in,

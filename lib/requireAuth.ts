@@ -116,7 +116,11 @@ export async function handleErrors(fn: () => Promise<Response>): Promise<Respons
     }
     const pgErr = err as { code?: string; statusCode?: number; message?: string };
     if (pgErr.code === 'P0001') return Response.json({ error: pgErr.message }, { status: 409 });
+    // Unique constraint violation — surface as 409 rather than 500.
+    if (pgErr.code === '23505') return Response.json({ error: 'A record with this value already exists.' }, { status: 409 });
     if (pgErr.statusCode)       return Response.json({ error: pgErr.message }, { status: pgErr.statusCode });
+    // Use console.error so it always appears in Vercel function logs.
+    console.error('[handleErrors] Unhandled Route Handler error:', err);
     logger.error('Unhandled Route Handler error', err);
     return Response.json({ error: 'An unexpected error occurred.' }, { status: 500 });
   }
