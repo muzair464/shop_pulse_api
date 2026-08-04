@@ -14,9 +14,12 @@ export async function GET(req: NextRequest, { params }: Context): Promise<Respon
       const { rows } = await client.query(
         `SELECT o.*, COALESCE(json_agg(json_build_object(
            'id',oi.id,'inventory_item_id',oi.inventory_item_id,'name_snapshot',oi.name_snapshot,
-           'qty',oi.qty,'unit_price',oi.unit_price,'line_total',oi.line_total
+           'qty',oi.qty,'unit_price',oi.unit_price,'line_total',oi.line_total,
+           'description', ii.description
          )) FILTER (WHERE oi.id IS NOT NULL),'[]'::json) AS order_items
-         FROM orders o LEFT JOIN order_items oi ON oi.order_id=o.id
+         FROM orders o
+         LEFT JOIN order_items oi ON oi.order_id=o.id
+         LEFT JOIN inventory_items ii ON ii.id=oi.inventory_item_id
          WHERE o.id=$1 AND o.shop_id=$2 GROUP BY o.id`,
         [id, user.shopId],
       );
