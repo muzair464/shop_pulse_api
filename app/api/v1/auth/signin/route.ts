@@ -10,7 +10,7 @@ import { logger } from '@/lib/logger';
 
 export async function POST(req: NextRequest): Promise<Response> {
   return handleErrors(async () => {
-    const { email, password } = await req.json() as { email?: string; password?: string };
+    const { email, password, rememberDevice } = await req.json() as { email?: string; password?: string; rememberDevice?: boolean };
     if (!email || !password) return Response.json({ error: 'Email and password are required.' }, { status: 400 });
 
     const tokens = await supabaseSignIn(email, password);
@@ -38,7 +38,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     }
     return jsonWithCookies(
       { user: { id: userId, email: tokens.user.email }, shop: { id: shop.id, name: shop.name } },
-      tokens.access_token, tokens.refresh_token, tokens.expires_in,
+      tokens.access_token, tokens.refresh_token, tokens.expires_in, 200, rememberDevice === true,
     );
   });
 }

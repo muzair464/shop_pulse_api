@@ -40,9 +40,14 @@ export function appendAuthCookies(
   accessToken:  string,
   refreshToken: string,
   expiresInSeconds: number,
+  rememberDevice = false,
 ): void {
-  headers.append('Set-Cookie', cookieString(ACCESS_COOKIE,  accessToken,  expiresInSeconds));
-  headers.append('Set-Cookie', cookieString(REFRESH_COOKIE, refreshToken, 30 * 24 * 60 * 60));
+  // When "remember this device" is checked keep the access token for 30 days,
+  // otherwise honour the server-supplied expiry (typically 1 hour).
+  const accessMaxAge  = rememberDevice ? 30 * 24 * 60 * 60 : expiresInSeconds;
+  const refreshMaxAge = 30 * 24 * 60 * 60;
+  headers.append('Set-Cookie', cookieString(ACCESS_COOKIE,  accessToken,  accessMaxAge));
+  headers.append('Set-Cookie', cookieString(REFRESH_COOKIE, refreshToken, refreshMaxAge));
 }
 
 /** Append clearing Set-Cookie headers to sign the user out. */
@@ -58,9 +63,10 @@ export function jsonWithCookies(
   refreshToken: string,
   expiresInSeconds: number,
   status = 200,
+  rememberDevice = false,
 ): Response {
   const headers = new Headers({ 'Content-Type': 'application/json' });
-  appendAuthCookies(headers, accessToken, refreshToken, expiresInSeconds);
+  appendAuthCookies(headers, accessToken, refreshToken, expiresInSeconds, rememberDevice);
   return new Response(JSON.stringify(body), { status, headers });
 }
 
