@@ -27,7 +27,6 @@ export async function GET(req: NextRequest): Promise<Response> {
 
       const [kpi, series] = await Promise.all([
         client.query(
-          // Use CURRENT_DATE AT TIME ZONE so "today" is local to the client.
           `SELECT
             (SELECT COUNT(*)
                FROM orders
@@ -41,7 +40,36 @@ export async function GET(req: NextRequest): Promise<Response> {
               WHERE shop_id    = $1
                 AND created_at >= (CURRENT_TIMESTAMP AT TIME ZONE $2)::date
                 AND created_at <  (CURRENT_TIMESTAMP AT TIME ZONE $2)::date + INTERVAL '1 day'
-            )::numeric AS revenue_today,
+            )::numeric AS sales_today,
+
+            -- Profit today = sales revenue minus cost of goods sold
+            (SELECT COALESCE(
+               SUM(oi.qty * oi.unit_price)           -- selling value
+             - SUM(oi.qty * COALESCE(ii.cost_price, 0)) -- cost value
+             , 0)
+               FROM orders o
+               JOIN order_items oi ON oi.order_id = o.id
+               LEFT JOIN inventory_items ii ON ii.id = oi.inventory_item_id
+              WHERE o.shop_id    = $1
+                AND o.created_at >= (CURRENT_TIMESTAMP AT TIME ZONE $2)::date
+                AND o.created_at <  (CURRENT_TIMESTAMP AT TIME ZONE $2)::date + INTERVAL '1 day'
+            )::numeric AS profit_today,
+
+            -- All-time total sales
+            (SELECT COALESCE(SUM(total), 0)
+               FROM orders WHERE shop_id = $1
+            )::numeric AS total_sales,
+
+            -- All-time total profit
+            (SELECT COALESCE(
+               SUM(oi.qty * oi.unit_price)
+             - SUM(oi.qty * COALESCE(ii.cost_price, 0))
+             , 0)
+               FROM orders o
+               JOIN order_items oi ON oi.order_id = o.id
+               LEFT JOIN inventory_items ii ON ii.id = oi.inventory_item_id
+              WHERE o.shop_id = $1
+            )::numeric AS total_profit,
 
             (SELECT COUNT(*) FROM inventory_items WHERE shop_id = $1)::int
               AS total_inventory_items,
@@ -77,7 +105,10 @@ export async function GET(req: NextRequest): Promise<Response> {
       const k = kpi.rows[0] as Record<string, string>;
       return Response.json({
         newOrders:           Number(k['new_orders_today']),
-        revenueToday:        Number(k['revenue_today']),
+        salesToday:          Number(k['sales_today']),
+        profitToday:         Number(k['profit_today']),
+        totalSales:          Number(k['total_sales']),
+        totalProfit:         Number(k['total_profit']),
         totalInventoryItems: Number(k['total_inventory_items']),
         lowStockCount:       Number(k['low_stock_count']),
         revenueSeries: series.rows.map(r => ({
