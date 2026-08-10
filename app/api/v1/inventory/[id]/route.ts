@@ -11,7 +11,8 @@ export async function PATCH(req: NextRequest, { params }: Context): Promise<Resp
     const { id }   = await params;
     const body = await req.json() as {
       name?: string; description?: string | null; category?: string;
-      stock?: number; sku?: string | null; cost_price?: number; selling_price?: number; version?: number;
+      stock?: number; imei?: string | null; imei2?: string | null;
+      sku?: string | null; cost_price?: number; selling_price?: number; version?: number;
     };
     if (body.version === undefined) return Response.json({ error: 'version is required.' }, { status: 400 });
 
@@ -24,14 +25,18 @@ export async function PATCH(req: NextRequest, { params }: Context): Promise<Resp
            description   = COALESCE($4, description),
            category      = COALESCE($5, category),
            stock         = COALESCE($6, stock),
-           sku           = COALESCE($7, sku),
-           cost_price    = COALESCE($8, cost_price),
-           selling_price = COALESCE($9, selling_price),
+           imei          = COALESCE($7, imei),
+           imei2         = COALESCE($8, imei2),
+           sku           = COALESCE($9, sku),
+           cost_price    = COALESCE($10, cost_price),
+           selling_price = COALESCE($11, selling_price),
            version = version + 1, updated_at = now()
-         WHERE id = $1 AND shop_id = $2 AND version = $10 RETURNING *`,
+         WHERE id = $1 AND shop_id = $2 AND version = $12 RETURNING *`,
         [id, user.shopId,
          body.name ?? null, body.description ?? null, body.category ?? null,
          body.stock !== undefined ? Number(body.stock) : null,
+         body.imei !== undefined ? (body.imei || null) : null,
+         body.imei2 !== undefined ? (body.imei2 || null) : null,
          body.sku ?? null,
          body.cost_price !== undefined ? Number(body.cost_price) : null,
          body.selling_price !== undefined ? Number(body.selling_price) : null,

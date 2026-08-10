@@ -27,7 +27,8 @@ export async function GET(req: NextRequest): Promise<Response> {
          AND    ($4::text IS NULL OR classification    = $4::item_classification)
          AND    ($5::text IS NULL OR name ILIKE '%'||$5||'%'
                                   OR category ILIKE '%'||$5||'%'
-                                  OR imei = $5)
+                                  OR imei = $5
+                                  OR imei2 = $5)
          ORDER  BY updated_at DESC, name
          LIMIT  $6 OFFSET $7`,
         [
@@ -53,7 +54,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     const user = await requireAuth(req);
     const body = await req.json() as {
       classification?: string; name?: string; description?: string | null;
-      category?: string; imei?: string | null; sku?: string | null;
+      category?: string; imei?: string | null; imei2?: string | null; sku?: string | null;
       stock?: number; cost_price?: number; selling_price?: number;
     };
     const { classification, name, category, stock, cost_price, selling_price } = body;
@@ -65,10 +66,10 @@ export async function POST(req: NextRequest): Promise<Response> {
       await setJwtClaims(client, user.claims);
       const { rows } = await client.query(
         `INSERT INTO inventory_items
-           (shop_id, classification, name, description, category, imei, sku, stock, cost_price, selling_price)
-         VALUES ($1,$2::item_classification,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+           (shop_id, classification, name, description, category, imei, imei2, sku, stock, cost_price, selling_price)
+         VALUES ($1,$2::item_classification,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
         [user.shopId, classification, name, body.description ?? null, category,
-         body.imei ?? null, body.sku ?? null, Number(stock), Number(cost_price), Number(selling_price)],
+         body.imei ?? null, body.imei2 ?? null, body.sku ?? null, Number(stock), Number(cost_price), Number(selling_price)],
       );
       return Response.json(rows[0], { status: 201 });
     } finally { client.release(); }
