@@ -2,13 +2,14 @@ import { NextRequest } from 'next/server';
 import { getAuthPool, setJwtClaims } from '@/lib/db';
 import { requireAuth, handleErrors, AppError } from '@/lib/requireAuth';
 
-type Ctx = { params: { id: string } };
-
 // GET /api/v1/customers/:id/transactions?page=1
-export async function GET(req: NextRequest, ctx: Ctx): Promise<Response> {
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+): Promise<Response> {
   return handleErrors(async () => {
     const user = await requireAuth(req);
-    const { id } = ctx.params;
+    const { id } = await params;
     const page   = Math.max(1, parseInt(new URL(req.url).searchParams.get('page') ?? '1', 10));
     const limit  = 30;
     const offset = (page - 1) * limit;
@@ -17,7 +18,6 @@ export async function GET(req: NextRequest, ctx: Ctx): Promise<Response> {
     try {
       await setJwtClaims(client, user.claims);
 
-      // Verify customer belongs to shop before returning transactions
       const { rows: check } = await client.query(
         `SELECT id FROM customers WHERE id = $1 AND shop_id = $2`,
         [id, user.shopId],
@@ -53,11 +53,13 @@ export async function GET(req: NextRequest, ctx: Ctx): Promise<Response> {
 }
 
 // POST /api/v1/customers/:id/transactions
-// Body: { tx_type: 'CREDIT'|'REPAYMENT', amount: number, notes?: string, order_id?: string }
-export async function POST(req: NextRequest, ctx: Ctx): Promise<Response> {
+export async function POST(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+): Promise<Response> {
   return handleErrors(async () => {
     const user = await requireAuth(req);
-    const { id } = ctx.params;
+    const { id } = await params;
     const body = await req.json() as {
       tx_type?: string; amount?: number; notes?: string | null; order_id?: string | null;
     };
@@ -71,14 +73,12 @@ export async function POST(req: NextRequest, ctx: Ctx): Promise<Response> {
     try {
       await setJwtClaims(client, user.claims);
 
-      // Verify customer belongs to this shop
       const { rows: check } = await client.query(
         `SELECT id FROM customers WHERE id = $1 AND shop_id = $2`,
         [id, user.shopId],
       );
       if (!check.length) throw new AppError('Customer not found.', 404);
 
-      // Guard: repayment cannot exceed current balance
       if (body.tx_type === 'REPAYMENT') {
         const { rows: bal } = await client.query(
           `SELECT balance FROM customers WHERE id = $1`, [id],
@@ -96,7 +96,6 @@ export async function POST(req: NextRequest, ctx: Ctx): Promise<Response> {
          body.tx_type, amount, body.notes?.trim() || null],
       );
 
-      // Return updated customer balance alongside the new transaction
       const { rows: cust } = await client.query(
         `SELECT id, name, balance FROM customers WHERE id = $1`, [id],
       );

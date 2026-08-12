@@ -2,13 +2,14 @@ import { NextRequest } from 'next/server';
 import { getAuthPool, setJwtClaims } from '@/lib/db';
 import { requireAuth, handleErrors, AppError } from '@/lib/requireAuth';
 
-type Ctx = { params: { id: string; txId: string } };
-
 // POST /api/v1/customers/:id/transactions/:txId/void
-export async function POST(req: NextRequest, ctx: Ctx): Promise<Response> {
+export async function POST(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string; txId: string }> },
+): Promise<Response> {
   return handleErrors(async () => {
     const user = await requireAuth(req);
-    const { id, txId } = ctx.params;
+    const { id, txId } = await params;
 
     const client = await getAuthPool().connect();
     try {
