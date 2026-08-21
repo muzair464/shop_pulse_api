@@ -35,6 +35,31 @@ export function sendNewDeviceAlert(ownerEmail: string, deviceName: string, revok
   }).catch((err: unknown) => logger.error('New-device email failed', err));
 }
 
+export async function sendPasswordResetEmail(to: string, resetUrl: string): Promise<void> {
+  await sendEmail({
+    to,
+    subject: 'ShopPulse: Reset your password',
+    html: `
+      <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px">
+        <h2 style="margin:0 0 8px;font-size:20px;color:#111827">Reset your password</h2>
+        <p style="margin:0 0 24px;color:#6b7280;font-size:14px">
+          We received a request to reset the password for your ShopPulse account.
+          Click the button below to choose a new one.
+        </p>
+        <a href="${resetUrl}"
+           style="display:inline-block;padding:12px 24px;background:#2563eb;color:#fff;
+                  text-decoration:none;border-radius:8px;font-size:14px;font-weight:600">
+          Reset password
+        </a>
+        <p style="margin:24px 0 0;color:#9ca3af;font-size:12px">
+          If you didn't request this, you can safely ignore this email.
+          This link expires in 1 hour.
+        </p>
+      </div>
+    `,
+  });
+}
+
 export function sendScheduledExport(ownerEmail: string, csvContent: string, filename: string): void {
   sendEmail({
     to: ownerEmail, subject: `ShopPulse: Scheduled export — ${filename}`,

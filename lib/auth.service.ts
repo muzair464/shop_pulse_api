@@ -5,6 +5,7 @@
 
 import { env } from './env';
 import { logger } from './logger';
+import { sendPasswordResetEmail } from './email.service';
 
 interface SupabaseTokenResponse {
   access_token:  string;
@@ -104,20 +105,49 @@ export async function supabaseRevokeSession(refreshToken: string): Promise<void>
 }
 
 export async function supabaseForgotPassword(email: string, redirectTo: string): Promise<void> {
-  // GoTrue /recover accepts redirect_to as a query-string parameter.
-  // Passing it in the JSON body is silently ignored by some GoTrue versions.
-  const url = `${env.SUPABASE_URL}/auth/v1/recover?redirect_to=${encodeURIComponent(redirectTo)}`;
-  const res = await fetch(url, {
+  // Use the Admin generateLink API to create a recovery link without sending
+  // any email through Supabase — Supabase's built-in mailer only delivers to
+  // project team members unless custom SMTP is configured, which causes 500s
+  // for real user email addresses. We generate the link ourselves and send
+  // the email via Resend (see email.service.ts).
+  const res = await fetch(`${env.SUPABASE_URL}/auth/v1/admin/generate_link`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'apikey': env.SUPABASE_ANON_KEY },
-    body: JSON.stringify({ email }),
+    headers: {
+      'Content-Type': 'application/json',
+      'apikey': env.SUPABASE_SERVICE_ROLE_KEY,
+      'Authorization': `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+    },
+    body: JSON.stringify({ type: 'recovery', email, redirect_to: redirectTo }),
   });
+
   if (!res.ok) {
     const b = await res.json() as SupabaseErrorResponse;
-    const msg = b.error_description ?? b.message ?? b.msg ?? b.error ?? 'Failed to send reset email.';
-    logger.error('supabaseForgotPassword failed', { status: res.status, body: b });
+    const msg = b.error_description ?? b.message ?? b.msg ?? b.error ?? 'Failed to generate reset link.';
+    logger.error('supabaseForgotPassword generate_link failed', { status: res.status, body: b });
     throw new Error(msg);
   }
+
+  const data = await res.json() as { action_link?: string; email?: string };
+  const actionLink = data.action_link;
+  if (!actionLink) {
+    logger.error('supabaseForgotPassword: no action_link in response', { data });
+    throw new Error('Failed to generate reset link.');
+  }
+
+  // action_link is the full Supabase-hosted redirect URL. We need to extract
+  // the token_hash and type from it and rebuild the link pointing to our app.
+  const parsed = new URL(actionLink);
+  const tokenHash = parsed.searchParams.get('token_hash') ?? parsed.hash.match(/token_hash=([^&]+)/)?.[1];
+  const type      = parsed.searchParams.get('type') ?? 'recovery';
+
+  if (!tokenHash) {
+    logger.error('supabaseForgotPassword: could not extract token_hash', { actionLink });
+    throw new Error('Failed to build reset link.');
+  }
+
+  const resetUrl = `${redirectTo}?token_hash=${encodeURIComponent(tokenHash)}&type=${type}`;
+  logger.info('Sending password reset email via Resend', { email, resetUrl });
+  await sendPasswordResetEmail(email, resetUrl);
 }
 
 export async function supabaseResendVerification(email: string, redirectTo: string): Promise<void> {
