@@ -104,16 +104,20 @@ export async function supabaseRevokeSession(refreshToken: string): Promise<void>
 }
 
 export async function supabaseForgotPassword(email: string, redirectTo: string): Promise<void> {
-  // The GoTrue REST API uses `redirect_to` as a top-level field, NOT nested
-  // under `options`. The `options.emailRedirectTo` shape is Supabase JS SDK
-  // syntax and is silently ignored by the raw REST endpoint, causing GoTrue
-  // to fall back to the project's site_url (the signin page).
-  const res = await fetch(`${env.SUPABASE_URL}/auth/v1/recover`, {
+  // GoTrue /recover accepts redirect_to as a query-string parameter.
+  // Passing it in the JSON body is silently ignored by some GoTrue versions.
+  const url = `${env.SUPABASE_URL}/auth/v1/recover?redirect_to=${encodeURIComponent(redirectTo)}`;
+  const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'apikey': env.SUPABASE_ANON_KEY },
-    body: JSON.stringify({ email, redirect_to: redirectTo }),
+    body: JSON.stringify({ email }),
   });
-  if (!res.ok) { const b = await res.json() as SupabaseErrorResponse; throw new Error(b.message ?? 'Failed to send reset email.'); }
+  if (!res.ok) {
+    const b = await res.json() as SupabaseErrorResponse;
+    const msg = b.error_description ?? b.message ?? b.msg ?? b.error ?? 'Failed to send reset email.';
+    logger.error('supabaseForgotPassword failed', { status: res.status, body: b });
+    throw new Error(msg);
+  }
 }
 
 export async function supabaseResendVerification(email: string, redirectTo: string): Promise<void> {
