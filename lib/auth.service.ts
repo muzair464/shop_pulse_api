@@ -134,14 +134,16 @@ export async function supabaseForgotPassword(email: string, redirectTo: string):
     throw new Error('Failed to generate reset link.');
   }
 
-  // action_link is the full Supabase-hosted redirect URL. We need to extract
-  // the token_hash and type from it and rebuild the link pointing to our app.
-  const parsed = new URL(actionLink);
-  const tokenHash = parsed.searchParams.get('token_hash') ?? parsed.hash.match(/token_hash=([^&]+)/)?.[1];
+  // The action_link returned by generate_link looks like:
+  // https://<project>.supabase.co/auth/v1/verify?token=<hash>&type=recovery&redirect_to=...
+  // The query param is `token`, not `token_hash`. We extract it and build
+  // our own set-password URL using `token_hash` (the name the /verify POST expects).
+  const parsed   = new URL(actionLink);
+  const tokenHash = parsed.searchParams.get('token') ?? parsed.searchParams.get('token_hash');
   const type      = parsed.searchParams.get('type') ?? 'recovery';
 
   if (!tokenHash) {
-    logger.error('supabaseForgotPassword: could not extract token_hash', { actionLink });
+    logger.error('supabaseForgotPassword: could not extract token from action_link', { actionLink });
     throw new Error('Failed to build reset link.');
   }
 
