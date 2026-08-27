@@ -21,9 +21,12 @@ export async function POST(req: NextRequest): Promise<Response> {
     const shop = shopRes.rows[0] ?? null;
 
     logger.info('Token exchanged', { userId, type });
+    // Password reset / invite links don't have a "remember me" checkbox —
+    // default to session-only cookies (rememberDevice = false).
     return jsonWithCookies(
       { ok: true, user: { id: userId, email: tokens.user.email }, shop: shop ? { id: shop.id, name: shop.name } : null },
       tokens.access_token, tokens.refresh_token, tokens.expires_in,
+      200, false,
     );
   });
 }
