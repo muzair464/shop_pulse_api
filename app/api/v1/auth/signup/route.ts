@@ -2,16 +2,32 @@ import { NextRequest } from 'next/server';
 import { supabaseSignUp, supabaseDeleteUser } from '@/lib/auth.service';
 import { getServicePool } from '@/lib/db';
 import { handleErrors } from '@/lib/requireAuth';
+import { checkRateLimit, rateLimitKey, tooManyRequests } from '@/lib/rateLimit';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
 
+// 5 signups per hour per IP.
+const SIGNUP_MAX    = 5;
+const SIGNUP_WINDOW = 60 * 60 * 1_000;
+
 export async function POST(req: NextRequest): Promise<Response> {
   return handleErrors(async () => {
+    // Rate limit before reading body (avoids parsing cost on throttled requests).
+    const rlResult = checkRateLimit(rateLimitKey(req), SIGNUP_MAX, SIGNUP_WINDOW);
+    if (!rlResult.allowed) {
+      logger.warn('signup rate-limited', { ip: req.headers.get('x-forwarded-for') });
+      return tooManyRequests(rlResult.retryAfterMs!);
+    }
+
     const { email, password, shopName, phone, address } = await req.json() as {
       email?: string; password?: string; shopName?: string; phone?: string; address?: string;
     };
-    if (!email || !password || !shopName) return Response.json({ error: 'email, password, and shopName are required.' }, { status: 400 });
-    if (password.length < 8) return Response.json({ error: 'Password must be at least 8 characters.' }, { status: 400 });
+    if (!email || !password || !shopName) {
+      return Response.json({ error: 'email, password, and shopName are required.' }, { status: 400 });
+    }
+    if (password.length < 8) {
+      return Response.json({ error: 'Password must be at least 8 characters.' }, { status: 400 });
+    }
 
     const redirectTo = `${env.FRONTEND_URL}/verify-email`;
     const newUser = await supabaseSignUp(email, password, redirectTo);
@@ -28,6 +44,9 @@ export async function POST(req: NextRequest): Promise<Response> {
     }
 
     logger.info('User signed up', { userId: newUser.id });
-    return Response.json({ ok: true, message: 'Account created. Please check your email to verify your address.' }, { status: 201 });
+    return Response.json(
+      { ok: true, message: 'Account created. Please check your email to verify your address.' },
+      { status: 201 },
+    );
   });
 }
