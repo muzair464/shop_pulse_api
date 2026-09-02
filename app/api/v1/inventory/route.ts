@@ -12,34 +12,56 @@ export async function GET(req: NextRequest): Promise<Response> {
     // Delta sync: only return rows updated after this ISO timestamp.
     // When absent, returns ALL rows for the shop (initial load).
     const updatedAfter = sp.get('updatedAfter'); // e.g. "2026-08-03T10:00:00.000Z"
+    const category = sp.get('category');
+    const classification = sp.get('classification');
+    const search = sp.get('search');
 
     const page   = Math.max(1, parseInt(sp.get('page') ?? '1', 10));
     const offset = (page - 1) * PAGE_SIZE;
+
+    // Build conditional WHERE clauses to help the planner use indexes
+    const conditions: string[] = ['shop_id = $1'];
+    const params: unknown[] = [user.shopId];
+    let paramIndex = 2;
+
+    if (updatedAfter) {
+      conditions.push(`updated_at > $${paramIndex}::timestamptz`);
+      params.push(updatedAfter);
+      paramIndex++;
+    }
+
+    if (category) {
+      conditions.push(`category = $${paramIndex}`);
+      params.push(category);
+      paramIndex++;
+    }
+
+    if (classification) {
+      conditions.push(`classification = $${paramIndex}::item_classification`);
+      params.push(classification);
+      paramIndex++;
+    }
+
+    if (search) {
+      // Separate OR condition for search - this way the planner can use the trigram index on name
+      conditions.push(
+        `(name ILIKE $${paramIndex} OR category ILIKE $${paramIndex} OR imei = $${paramIndex} OR imei2 = $${paramIndex})`
+      );
+      params.push(`%${search}%`);
+      paramIndex++;
+    }
+
+    const whereClause = conditions.join(' AND ');
 
     const client = await getAuthPool().connect();
     try {
       await setJwtClaims(client, user.claims);
       const { rows } = await client.query(
         `SELECT * FROM inventory_items
-         WHERE  shop_id = $1
-         AND    ($2::timestamptz IS NULL OR updated_at > $2::timestamptz)
-         AND    ($3::text IS NULL OR category          = $3)
-         AND    ($4::text IS NULL OR classification    = $4::item_classification)
-         AND    ($5::text IS NULL OR name ILIKE '%'||$5||'%'
-                                  OR category ILIKE '%'||$5||'%'
-                                  OR imei = $5
-                                  OR imei2 = $5)
+         WHERE  ${whereClause}
          ORDER  BY updated_at DESC, name
-         LIMIT  $6 OFFSET $7`,
-        [
-          user.shopId,
-          updatedAfter ?? null,
-          sp.get('category')       ?? null,
-          sp.get('classification') ?? null,
-          sp.get('search')         ?? null,
-          PAGE_SIZE,
-          offset,
-        ],
+         LIMIT  $${paramIndex} OFFSET $${paramIndex + 1}`,
+        [...params, PAGE_SIZE, offset],
       );
       // Return the server's current time so the client can store it as
       // next sync cursor — avoids client/server clock skew.

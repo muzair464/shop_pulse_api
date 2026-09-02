@@ -21,59 +21,87 @@ export async function GET(req: NextRequest): Promise<Response> {
       status === 'overdue' ? 'AND c.balance > 0' :
       status === 'settled' ? 'AND c.balance <= 0' : '';
 
-    const client = await getAuthPool().connect();
-    try {
-      await setJwtClaims(client, user.claims);
+    // Build conditional search clauses to avoid query planner defeating "IS NULL OR" pattern
+    const searchConditions: string[] = [];
+    const searchParams: unknown[] = [user.shopId];
+    let paramIndex = 2;
 
-      const [rows, countRow] = await Promise.all([
-        client.query(
-          `SELECT
-             c.id, c.shop_id, c.name, c.phone, c.cnic, c.notes,
-             c.balance, c.created_at, c.updated_at,
-             s.last_tx_at, s.last_repayment_at, s.tx_count
-           FROM   customer_khata_summary s
-           JOIN   customers c ON c.id = s.id
-           WHERE  c.shop_id = $1
-             ${statusClause}
-             AND  ($2::text IS NULL
-                   OR c.name  ILIKE '%' || $2 || '%'
-                   OR c.phone ILIKE '%' || $2 || '%'
-                   OR c.cnic  ILIKE '%' || $2 || '%')
-           ORDER  BY c.balance DESC, c.name ASC
-           LIMIT  $3 OFFSET $4`,
-          [user.shopId, search, limit, offset],
-        ),
-        client.query<{ total: string }>(
-          `SELECT COUNT(*)::text AS total FROM customers c
-           WHERE  c.shop_id = $1
-             ${statusClause}
-             AND  ($2::text IS NULL
-                   OR c.name  ILIKE '%' || $2 || '%'
-                   OR c.phone ILIKE '%' || $2 || '%'
-                   OR c.cnic  ILIKE '%' || $2 || '%')`,
-          [user.shopId, search],
-        ),
-      ]);
+    if (search) {
+      searchConditions.push(
+        `(c.name ILIKE $${paramIndex} OR c.phone ILIKE $${paramIndex} OR c.cnic ILIKE $${paramIndex})`
+      );
+      searchParams.push(`%${search}%`);
+      paramIndex++;
+    }
+
+    const searchClause = searchConditions.length > 0
+      ? `AND ${searchConditions.join(' AND ')}`
+      : '';
+
+    const pool = getAuthPool();
+
+    // Parallel execution with separate connections for true concurrency
+    const [rowsResult, countResult, kpiResult] = await Promise.all([
+      (async () => {
+        const client = await pool.connect();
+        try {
+          await setJwtClaims(client, user.claims);
+          return await client.query(
+            `SELECT
+               c.id, c.shop_id, c.name, c.phone, c.cnic, c.notes,
+               c.balance, c.created_at, c.updated_at,
+               s.last_tx_at, s.last_repayment_at, s.tx_count
+             FROM   customer_khata_summary s
+             JOIN   customers c ON c.id = s.id
+             WHERE  c.shop_id = $1
+               ${statusClause}
+               ${searchClause}
+             ORDER  BY c.balance DESC, c.name ASC
+             LIMIT  $${paramIndex} OFFSET $${paramIndex + 1}`,
+            [...searchParams, limit, offset],
+          );
+        } finally { client.release(); }
+      })(),
+
+      (async () => {
+        const client = await pool.connect();
+        try {
+          await setJwtClaims(client, user.claims);
+          return await client.query<{ total: string }>(
+            `SELECT COUNT(*)::text AS total FROM customers c
+             WHERE  c.shop_id = $1
+               ${statusClause}
+               ${searchClause}`,
+            searchParams,
+          );
+        } finally { client.release(); }
+      })(),
 
       // KPI totals for the header cards
-      const { rows: kpi } = await client.query(
-        `SELECT
-           COUNT(*)::int                              AS total_customers,
-           COUNT(*) FILTER (WHERE balance > 0)::int  AS overdue_count,
-           COALESCE(SUM(balance) FILTER (WHERE balance > 0), 0)::numeric AS total_outstanding,
-           COALESCE(SUM(balance) FILTER (WHERE balance < 0), 0)::numeric AS total_advance
-         FROM customers WHERE shop_id = $1`,
-        [user.shopId],
-      );
+      (async () => {
+        const client = await pool.connect();
+        try {
+          await setJwtClaims(client, user.claims);
+          return await client.query(
+            `SELECT
+               COUNT(*)::int                              AS total_customers,
+               COUNT(*) FILTER (WHERE balance > 0)::int  AS overdue_count,
+               COALESCE(SUM(balance) FILTER (WHERE balance > 0), 0)::numeric AS total_outstanding,
+               COALESCE(SUM(balance) FILTER (WHERE balance < 0), 0)::numeric AS total_advance
+             FROM customers WHERE shop_id = $1`,
+            [user.shopId],
+          );
+        } finally { client.release(); }
+      })(),
+    ]);
 
-      return Response.json({
-        customers:  rows.rows,
-        total:      parseInt(countRow.rows[0].total, 10),
-        page,
-        limit,
-        kpi:        kpi[0],
-      });
-    } finally { client.release(); }
+    return Response.json({
+      customers:  rowsResult.rows,
+      total:      parseInt(countResult.rows[0].total, 10),
+      page,
+      limit,
+      kpi:        kpiResult.rows[0],
+    });
   });
 }
 
