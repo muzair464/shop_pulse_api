@@ -21,8 +21,9 @@ export function getAuthPool(): Pool {
   if (!_authPool) {
     _authPool = new Pool({
       connectionString:     env.DATABASE_URL_AUTH,
-      max:                  5,   // lower than Express — serverless concurrency is bounded
-      idleTimeoutMillis:    20_000,
+      max:                  3,   // Reduced for serverless - Supabase pooler limit is 15
+      min:                  0,   // No idle connections
+      idleTimeoutMillis:    10_000,  // Release idle connections faster
       connectionTimeoutMillis: 5_000,
     });
   }
@@ -33,8 +34,9 @@ export function getServicePool(): Pool {
   if (!_svcPool) {
     _svcPool = new Pool({
       connectionString:     env.DATABASE_URL_SERVICE,
-      max:                  3,
-      idleTimeoutMillis:    20_000,
+      max:                  2,   // Reduced for serverless
+      min:                  0,
+      idleTimeoutMillis:    10_000,
       connectionTimeoutMillis: 5_000,
     });
   }
