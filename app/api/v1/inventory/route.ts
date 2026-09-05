@@ -56,6 +56,15 @@ export async function GET(req: NextRequest): Promise<Response> {
     const client = await getAuthPool().connect();
     try {
       await setJwtClaims(client, user.claims);
+
+      // Total matching rows (same filters, no LIMIT/OFFSET) so the client
+      // knows when it has fetched the complete dataset across pages.
+      const { rows: countRows } = await client.query<{ count: string }>(
+        `SELECT COUNT(*) AS count FROM inventory_items WHERE ${whereClause}`,
+        params,
+      );
+      const total = parseInt(countRows[0].count, 10);
+
       const { rows } = await client.query(
         `SELECT * FROM inventory_items
          WHERE  ${whereClause}
@@ -66,7 +75,7 @@ export async function GET(req: NextRequest): Promise<Response> {
       // Return the server's current time so the client can store it as
       // next sync cursor — avoids client/server clock skew.
       const { rows: tsRows } = await client.query<{ now: string }>('SELECT now() AS now');
-      return Response.json({ items: rows, syncedAt: tsRows[0].now });
+      return Response.json({ items: rows, total, syncedAt: tsRows[0].now });
     } finally { client.release(); }
   });
 }
