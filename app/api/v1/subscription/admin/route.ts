@@ -1,11 +1,12 @@
 import { NextRequest } from 'next/server';
 import { getServicePool } from '@/lib/db';
-import { requireAuth, handleErrors, AppError } from '@/lib/requireAuth';
+import { handleErrors, AppError } from '@/lib/requireAuth';
+import { requireAdminPasscode } from '@/lib/requireAdminPasscode';
 
 // GET /api/v1/subscription/admin/payments — view all submitted payments (for admin verification)
 export async function GET(req: NextRequest): Promise<Response> {
   return handleErrors(async () => {
-    const user = await requireAuth(req);
+    await requireAdminPasscode(req);
     const pool = getServicePool();
 
     // Fetch payments with shop info
@@ -31,7 +32,7 @@ export async function GET(req: NextRequest): Promise<Response> {
 // POST /api/v1/subscription/admin/verify — approve or reject a payment request
 export async function POST(req: NextRequest): Promise<Response> {
   return handleErrors(async () => {
-    const user = await requireAuth(req);
+    await requireAdminPasscode(req);
     const body = await req.json() as {
       paymentId?: string;
       action?: 'approve' | 'reject';

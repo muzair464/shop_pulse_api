@@ -1,11 +1,29 @@
 import { NextRequest } from 'next/server';
 import { getServicePool } from '@/lib/db';
-import { requireAuth, handleErrors, AppError } from '@/lib/requireAuth';
+import { handleErrors, AppError } from '@/lib/requireAuth';
+import { requireAdminPasscode } from '@/lib/requireAdminPasscode';
+
+// GET /api/v1/subscription/admin/settings — fetch settings for admin panel
+export async function GET(req: NextRequest): Promise<Response> {
+  return handleErrors(async () => {
+    await requireAdminPasscode(req);
+    const pool = getServicePool();
+    const { rows } = await pool.query(
+      `SELECT monthly_fee, bank_name, account_title, account_number, iban,
+              easypaisa_title, easypaisa_number, instructions,
+              CASE WHEN payment_qr_bytes IS NOT NULL
+                THEN 'data:'||payment_qr_mime_type||';base64,'||encode(payment_qr_bytes,'base64')
+                ELSE NULL END AS "paymentQrDataUri"
+       FROM system_subscription_settings WHERE id = 1`
+    );
+    return Response.json({ settings: rows[0] });
+  });
+}
 
 // PATCH /api/v1/subscription/admin/settings — update global Easypaisa & Bank details & QR
 export async function PATCH(req: NextRequest): Promise<Response> {
   return handleErrors(async () => {
-    const user = await requireAuth(req);
+    await requireAdminPasscode(req);
     const body = await req.json() as {
       monthlyFee?: number;
       bankName?: string;
