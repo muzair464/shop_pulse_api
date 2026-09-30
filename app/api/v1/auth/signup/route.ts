@@ -34,7 +34,8 @@ export async function POST(req: NextRequest): Promise<Response> {
 
     try {
       await getServicePool().query(
-        `INSERT INTO shops (owner_user_id, name, phone, address) VALUES ($1, $2, $3, $4)`,
+        `INSERT INTO shops (owner_user_id, name, phone, address, subscription_status, subscription_expires_at)
+         VALUES ($1, $2, $3, $4, 'expired', now())`,
         [newUser.id, shopName.trim(), phone?.trim() ?? null, address?.trim() ?? null],
       );
     } catch (dbErr) {
