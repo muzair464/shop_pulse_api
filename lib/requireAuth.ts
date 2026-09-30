@@ -20,11 +20,14 @@ import { getAuthPool } from './db';
 import { logger } from './logger';
 
 export interface AuthedUser {
-  userId:   string;
-  shopId:   string;
-  email:    string;
-  deviceId: string | null;
-  claims:   Record<string, unknown>;
+  userId:                 string;
+  shopId:                 string;
+  email:                  string;
+  deviceId:               string | null;
+  claims:                 Record<string, unknown>;
+  subscriptionStatus:     string;
+  subscriptionExpiresAt:  string | null;
+  isSubscriptionActive:   boolean;
 }
 
 /** Thrown when authentication fails — caught by handleErrors() to return 401. */
@@ -47,11 +50,29 @@ export class AppError extends Error {
   }
 }
 
+/** Thrown when a shop subscription is expired — returns 402 Payment Required. */
+export class SubscriptionError extends Error {
+  readonly status = 402;
+  constructor(message = 'Subscription expired. Service is down until payment is verified.') {
+    super(message);
+    this.name = 'SubscriptionError';
+  }
+}
+
+export interface RequireAuthOptions {
+  checkSubscription?: boolean;
+}
+
 /**
  * Verify the httpOnly access_token cookie and resolve the user + shop.
  * Throws AuthError on any failure — never returns null.
+ * When options.checkSubscription is true (or defaulted in core endpoints),
+ * verifies whether the shop subscription has expired.
  */
-export async function requireAuth(request: Request): Promise<AuthedUser> {
+export async function requireAuth(
+  request: Request,
+  options: RequireAuthOptions = {},
+): Promise<AuthedUser> {
   const cookieHeader = request.headers.get('cookie') ?? '';
   const token        = parseCookie(cookieHeader, 'access_token');
   if (!token) throw new AuthError('Not authenticated.');
@@ -72,9 +93,16 @@ export async function requireAuth(request: Request): Promise<AuthedUser> {
 
   const pool = getAuthPool();
   const { rows } = await pool.query<{
-    shop_id: string; device_id: string | null; revoked_at: string | null; email: string;
+    shop_id: string;
+    device_id: string | null;
+    revoked_at: string | null;
+    email: string;
+    subscription_status: string | null;
+    subscription_expires_at: string | null;
   }>(
-    `SELECT s.id AS shop_id, d.id AS device_id, d.revoked_at, u.email
+    `SELECT s.id AS shop_id, d.id AS device_id, d.revoked_at, u.email,
+            COALESCE(s.subscription_status, 'active') AS subscription_status,
+            s.subscription_expires_at
      FROM   auth.users u
      JOIN   shops s ON s.owner_user_id = u.id
      LEFT JOIN devices d ON d.user_id = u.id AND d.session_id = $2::uuid
@@ -91,18 +119,30 @@ export async function requireAuth(request: Request): Promise<AuthedUser> {
       .catch((e: unknown) => logger.warn('Failed to bump last_active_at', e));
   }
 
+  const subStatus = rows[0].subscription_status ?? 'active';
+  const expiresAt = rows[0].subscription_expires_at;
+  const isExpired = expiresAt ? new Date(expiresAt).getTime() < Date.now() : false;
+  const isSubscriptionActive = subStatus === 'active' && !isExpired;
+
+  if (options.checkSubscription && !isSubscriptionActive) {
+    throw new SubscriptionError();
+  }
+
   return {
     userId,
-    shopId:   rows[0].shop_id,
-    email:    rows[0].email,
-    deviceId: rows[0].device_id,
+    shopId:                 rows[0].shop_id,
+    email:                  rows[0].email,
+    deviceId:               rows[0].device_id,
     claims,
+    subscriptionStatus:     subStatus,
+    subscriptionExpiresAt:  expiresAt,
+    isSubscriptionActive,
   };
 }
 
 /**
  * Wraps Route Handler logic with consistent error handling.
- * Catches AuthError → 401, AppError → custom status, pg P0001 → 409, else 500.
+ * Catches AuthError → 401, SubscriptionError → 402, AppError → custom status, pg P0001 → 409, else 500.
  */
 export async function handleErrors(fn: () => Promise<Response>): Promise<Response> {
   try {
@@ -110,6 +150,9 @@ export async function handleErrors(fn: () => Promise<Response>): Promise<Respons
   } catch (err) {
     if (err instanceof AuthError) {
       return Response.json({ error: err.message }, { status: err.status });
+    }
+    if (err instanceof SubscriptionError) {
+      return Response.json({ error: err.message, code: 'SUBSCRIPTION_EXPIRED' }, { status: 402 });
     }
     if (err instanceof AppError) {
       return Response.json({ error: err.message }, { status: err.status });

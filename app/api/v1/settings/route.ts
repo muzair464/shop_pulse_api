@@ -15,12 +15,24 @@ export async function GET(req: NextRequest): Promise<Response> {
                   ELSE NULL END AS "paymentQrDataUri",
                 auto_export_frequency AS "autoExportFrequency",
                 auto_print_receipt    AS "autoPrintReceipt",
-                receipt_footer_message AS "receiptFooterMessage"
+                receipt_footer_message AS "receiptFooterMessage",
+                COALESCE(subscription_status, 'active') AS "subscriptionStatus",
+                subscription_expires_at AS "subscriptionExpiresAt",
+                COALESCE(subscription_monthly_fee, 2000) AS "subscriptionMonthlyFee"
          FROM shops WHERE owner_user_id=$1`,
         [user.userId],
       );
       if (!rows[0]) return Response.json({ error: 'Shop not found.' }, { status: 404 });
-      return Response.json(rows[0]);
+      const shop = rows[0];
+      const isExpired = shop.subscriptionExpiresAt
+        ? new Date(shop.subscriptionExpiresAt).getTime() < Date.now()
+        : false;
+      const isSubscriptionActive = shop.subscriptionStatus === 'active' && !isExpired;
+
+      return Response.json({
+        ...shop,
+        isSubscriptionActive,
+      });
     } finally { client.release(); }
   });
 }

@@ -108,7 +108,7 @@ export async function GET(req: NextRequest): Promise<Response> {
 // POST /api/v1/customers  — create a new customer
 export async function POST(req: NextRequest): Promise<Response> {
   return handleErrors(async () => {
-    const user = await requireAuth(req);
+    const user = await requireAuth(req, { checkSubscription: true });
     const body = await req.json() as {
       name?: string; phone?: string | null; cnic?: string | null; notes?: string | null;
     };

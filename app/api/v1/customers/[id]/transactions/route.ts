@@ -58,7 +58,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   return handleErrors(async () => {
-    const user = await requireAuth(req);
+    const user = await requireAuth(req, { checkSubscription: true });
     const { id } = await params;
     const body = await req.json() as {
       tx_type?: string; amount?: number; notes?: string | null; order_id?: string | null;

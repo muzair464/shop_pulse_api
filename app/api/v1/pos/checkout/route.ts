@@ -8,7 +8,7 @@ interface CheckoutItem { inventoryId: string; qty: number; unitPrice: number; na
 
 export async function POST(req: NextRequest): Promise<Response> {
   return handleErrors(async () => {
-    const user = await requireAuth(req);
+    const user = await requireAuth(req, { checkSubscription: true });
     const {
       items, discount, paymentMethod, idempotencyKey,
       customerName, customerPhone, customerCnic,

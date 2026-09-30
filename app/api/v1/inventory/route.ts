@@ -82,7 +82,7 @@ export async function GET(req: NextRequest): Promise<Response> {
 
 export async function POST(req: NextRequest): Promise<Response> {
   return handleErrors(async () => {
-    const user = await requireAuth(req);
+    const user = await requireAuth(req, { checkSubscription: true });
     const body = await req.json() as {
       classification?: string; name?: string; description?: string | null;
       category?: string; imei?: string | null; imei2?: string | null; sku?: string | null;

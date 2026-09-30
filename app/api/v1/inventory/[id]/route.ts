@@ -7,7 +7,7 @@ type Context = { params: Promise<{ id: string }> };
 
 export async function PATCH(req: NextRequest, { params }: Context): Promise<Response> {
   return handleErrors(async () => {
-    const user     = await requireAuth(req);
+    const user     = await requireAuth(req, { checkSubscription: true });
     const { id }   = await params;
     const body = await req.json() as {
       name?: string; description?: string | null; category?: string;
@@ -57,7 +57,7 @@ export async function PATCH(req: NextRequest, { params }: Context): Promise<Resp
 
 export async function DELETE(req: NextRequest, { params }: Context): Promise<Response> {
   return handleErrors(async () => {
-    const user   = await requireAuth(req);
+    const user   = await requireAuth(req, { checkSubscription: true });
     const { id } = await params;
     const client = await getAuthPool().connect();
     try {
