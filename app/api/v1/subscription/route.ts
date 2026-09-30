@@ -53,7 +53,7 @@ export async function GET(req: NextRequest): Promise<Response> {
 
       return Response.json({
         systemSettings: systemRows[0] || {
-          monthly_fee: 2000,
+          monthly_fee: 3000,
           bank_name: 'Meezan Bank',
           account_title: 'ShopPulse Billing',
           account_number: '0101-0102030405',
@@ -67,7 +67,7 @@ export async function GET(req: NextRequest): Promise<Response> {
           status: subStatus,
           expiresAt,
           isSubscriptionActive,
-          monthlyFee: shop?.subscription_monthly_fee ?? 2000,
+          monthlyFee: shop?.subscription_monthly_fee ?? 3000,
         },
         payments: paymentRows,
       });
