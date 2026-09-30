@@ -43,9 +43,13 @@ export async function GET(req: NextRequest): Promise<Response> {
 
       const shop = shopRows[0];
       const expiresAt = shop?.subscription_expires_at;
-      const isExpired = expiresAt ? new Date(expiresAt).getTime() < Date.now() : false;
-      const subStatus = shop?.subscription_status ?? 'active';
-      const isSubscriptionActive = subStatus === 'active' && !isExpired;
+      const isExpired = expiresAt ? new Date(expiresAt).getTime() < Date.now() : true;
+      const subStatus = shop?.subscription_status ?? 'expired';
+      // Both 'active' and 'trial' are live — no payment required.
+      // 'trial' ignores the expiry date (admin-granted, never auto-expires from backend).
+      const isSubscriptionActive =
+        (subStatus === 'active' && !isExpired) ||
+        subStatus === 'trial';
 
       return Response.json({
         systemSettings: systemRows[0] || {
